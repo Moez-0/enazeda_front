@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { useLanguage } from "@/contexts/LanguageContext";
@@ -32,9 +32,19 @@ interface ActiveWalk {
 
 const MapController = ({ center }: { center: [number, number] }) => {
   const map = useMap();
+  const firstRender = useRef(true);
+
   useEffect(() => {
-    map.setView(center, 15);
-  }, [map, center]);
+    if (!center) return;
+    // Use flyTo after first render for smooth transition
+    if (firstRender.current) {
+      map.setView(center, 15);
+      firstRender.current = false;
+    } else {
+      map.flyTo(center, 15, { duration: 1 });
+    }
+  }, [center, map]);
+
   return null;
 };
 
@@ -56,13 +66,11 @@ const GuardianView = () => {
     }
   }, [isAuthenticated]);
 
-  // Set up refresh interval only when we have a selected walk
+  // Refresh interval for selected walk
   useEffect(() => {
     if (isAuthenticated && selectedWalk) {
-      // Refresh every 10 seconds
       const interval = setInterval(() => {
         refreshWalkLocation();
-        // Also check for new panic events
         checkForPanicAlerts();
       }, 10000);
       return () => clearInterval(interval);
@@ -71,19 +79,14 @@ const GuardianView = () => {
 
   const loadActiveWalks = async () => {
     if (!isAuthenticated) return;
-    
+
     setIsLoading(true);
     try {
       const response = await api.getGuardianActiveWalks();
       setActiveWalks(response.walks);
-      if (response.walks.length > 0 && !selectedWalk) {
-        setSelectedWalk(response.walks[0]);
-      } else if (response.walks.length === 0) {
-        setSelectedWalk(null);
-      }
+      setSelectedWalk(response.walks.length > 0 ? response.walks[0] : null);
     } catch (error: any) {
       console.error("Failed to load active walks:", error);
-      // Don't show error toast if it's just "no walks found"
       if (error.message && !error.message.includes("not found") && !error.message.includes("User not found")) {
         toast({
           title: "Error",
@@ -92,6 +95,7 @@ const GuardianView = () => {
         });
       }
       setActiveWalks([]);
+      setSelectedWalk(null);
     } finally {
       setIsLoading(false);
     }
@@ -99,24 +103,24 @@ const GuardianView = () => {
 
   const refreshWalkLocation = async () => {
     if (!isAuthenticated || !selectedWalk) return;
-    
+
     setIsRefreshing(true);
     try {
       const response = await api.getWalkLocation(selectedWalk.id);
-      setActiveWalks(prev => prev.map(walk => 
-        walk.id === selectedWalk.id 
-          ? { ...walk, currentLocation: response.location, lastCheckIn: response.lastCheckIn, panicEvents: response.panicEvents }
-          : walk
-      ));
-      setSelectedWalk(prev => prev ? {
-        ...prev,
-        currentLocation: response.location,
-        lastCheckIn: response.lastCheckIn,
-        panicEvents: response.panicEvents,
-      } : null);
+      setActiveWalks(prev =>
+        prev.map(walk =>
+          walk.id === selectedWalk.id
+            ? { ...walk, currentLocation: response.location, lastCheckIn: response.lastCheckIn, panicEvents: response.panicEvents }
+            : walk
+        )
+      );
+      setSelectedWalk(prev =>
+        prev
+          ? { ...prev, currentLocation: response.location, lastCheckIn: response.lastCheckIn, panicEvents: response.panicEvents }
+          : null
+      );
     } catch (error: any) {
       console.error("Failed to refresh location:", error);
-      // If walk no longer exists, reload the list
       if (error.message && error.message.includes("not found")) {
         loadActiveWalks();
       }
@@ -127,13 +131,12 @@ const GuardianView = () => {
 
   const checkForPanicAlerts = async () => {
     if (!isAuthenticated || !selectedWalk) return;
-    
+
     try {
       const response = await api.getWalkLocation(selectedWalk.id);
       const previousPanicCount = selectedWalk.panicEvents;
-      
+
       if (previousPanicCount < response.panicEvents) {
-        // New panic event detected
         toast({
           title: "🚨 Panic Alert!",
           description: `${selectedWalk.userName} has triggered the panic button! Check their location immediately.`,
@@ -150,7 +153,7 @@ const GuardianView = () => {
     const now = new Date();
     const diffMs = now.getTime() - date.getTime();
     const diffMins = Math.floor(diffMs / 60000);
-    
+
     if (diffMins < 1) return "Just now";
     if (diffMins < 60) return `${diffMins}m ago`;
     const diffHours = Math.floor(diffMins / 60);
@@ -162,21 +165,13 @@ const GuardianView = () => {
     return (
       <div className="min-h-screen p-4 pt-8 pb-24">
         <div className="max-w-md mx-auto">
-          <Button
-            variant="ghost"
-            onClick={() => navigate(-1)}
-            className="mb-4"
-          >
+          <Button variant="ghost" onClick={() => navigate(-1)} className="mb-4">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
           <div className="border border-border/30 p-8 bg-card rounded-lg text-center">
-            <p className="text-sm text-foreground/80 mb-2">
-              Please log in to view active walks
-            </p>
-            <Button onClick={() => navigate("/auth")}>
-              Go to Login
-            </Button>
+            <p className="text-sm text-foreground/80 mb-2">Please log in to view active walks</p>
+            <Button onClick={() => navigate("/auth")}>Go to Login</Button>
           </div>
         </div>
       </div>
@@ -197,21 +192,12 @@ const GuardianView = () => {
     <div className="min-h-screen pb-24">
       <div className="sticky top-0 z-10 bg-background border-b border-border/30 p-4">
         <div className="max-w-md mx-auto flex items-center justify-between">
-          <Button
-            variant="ghost"
-            onClick={() => navigate(-1)}
-            size="sm"
-          >
+          <Button variant="ghost" onClick={() => navigate(-1)} size="sm">
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
           <h1 className="text-lg font-medium text-foreground">Active Walks</h1>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={loadActiveWalks}
-            disabled={isRefreshing}
-          >
+          <Button variant="ghost" size="sm" onClick={loadActiveWalks} disabled={isRefreshing}>
             <RefreshCw className={`w-4 h-4 ${isRefreshing ? "animate-spin" : ""}`} />
           </Button>
         </div>
@@ -221,9 +207,7 @@ const GuardianView = () => {
         <div className="p-4">
           <div className="max-w-md mx-auto border border-border/30 p-8 bg-card rounded-lg text-center">
             <Users className="w-12 h-12 text-foreground/40 mx-auto mb-4" />
-            <p className="text-sm text-foreground/80 mb-2">
-              No active walks to monitor
-            </p>
+            <p className="text-sm text-foreground/80 mb-2">No active walks to monitor</p>
             <p className="text-xs text-foreground/60">
               When someone starts a walk with you as a guardian, it will appear here
             </p>
@@ -232,7 +216,7 @@ const GuardianView = () => {
       ) : (
         <div className="flex flex-col h-[calc(100vh-80px)]">
           {/* Map View */}
-          {selectedWalk && (
+          {selectedWalk && selectedWalk.currentLocation && (
             <div className="flex-1 relative">
               <MapContainer
                 center={[selectedWalk.currentLocation.lat, selectedWalk.currentLocation.lng]}
@@ -260,7 +244,7 @@ const GuardianView = () => {
                   />
                 )}
               </MapContainer>
-              
+
               {/* Walk Info Overlay */}
               <div className="absolute bottom-4 left-4 right-4 z-10">
                 <div className="bg-background/95 backdrop-blur-sm border border-border/30 p-4 rounded-lg">
@@ -283,9 +267,7 @@ const GuardianView = () => {
                       <Clock className="w-3 h-3" />
                       <span>{selectedWalk.checkIns} check-ins</span>
                     </div>
-                    {selectedWalk.lastCheckIn && (
-                      <span>Last: {formatTime(selectedWalk.lastCheckIn)}</span>
-                    )}
+                    {selectedWalk.lastCheckIn && <span>Last: {formatTime(selectedWalk.lastCheckIn)}</span>}
                   </div>
                 </div>
               </div>
@@ -295,7 +277,7 @@ const GuardianView = () => {
           {/* Walk List */}
           <div className="border-t border-border/30 bg-background p-4 max-h-48 overflow-y-auto">
             <div className="max-w-md mx-auto space-y-2">
-              {activeWalks.map((walk) => (
+              {activeWalks.map(walk => (
                 <div
                   key={walk.id}
                   onClick={() => setSelectedWalk(walk)}
@@ -305,17 +287,13 @@ const GuardianView = () => {
                 >
                   <div className="flex items-center justify-between">
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-foreground truncate">
-                        {walk.userName}
-                      </p>
+                      <p className="text-sm font-medium text-foreground truncate">{walk.userName}</p>
                       <div className="flex items-center gap-2 text-xs text-foreground/80 mt-1">
                         <MapPin className="w-3 h-3" />
                         <span>Started {formatTime(walk.startTime)}</span>
                       </div>
                     </div>
-                    {walk.panicEvents > 0 && (
-                      <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />
-                    )}
+                    {walk.panicEvents > 0 && <AlertTriangle className="w-4 h-4 text-destructive flex-shrink-0" />}
                   </div>
                 </div>
               ))}
@@ -328,3 +306,4 @@ const GuardianView = () => {
 };
 
 export default GuardianView;
+
