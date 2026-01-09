@@ -14,22 +14,12 @@ L.Icon.Default.mergeOptions({
   shadowUrl: "https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png",
 });
 
-const TUNIS_CENTER: [number, number] = [36.8065, 10.1815];
-
 const safeIcon = new L.DivIcon({
   html: `<div style="width:12px;height:12px;background:#3d9970;border-radius:50%;border:2px solid #0a0a0a"></div>`,
   className: "",
   iconSize: [12, 12],
   iconAnchor: [6, 6],
 });
-
-const MapController = () => {
-  const map = useMap();
-  useEffect(() => {
-    map.setView(TUNIS_CENTER, 14);
-  }, [map]);
-  return null;
-};
 
 const getHeatColor = (intensity: number) => {
   if (intensity >= 0.7) return "#c0392b";
@@ -40,38 +30,45 @@ const getHeatColor = (intensity: number) => {
 const SafetyMap = () => {
   const { t } = useLanguage();
   const { isAuthenticated } = useAuth();
+
   const [showSafeSpaces, setShowSafeSpaces] = useState(true);
   const [timeFilter, setTimeFilter] = useState<"24h" | "7d" | "30d">("7d");
-  const [heatmapData, setHeatmapData] = useState<Array<{ lat: number; lng: number; count: number; types: Record<string, number> }>>([]);
+  const [heatmapData, setHeatmapData] = useState<
+    Array<{ lat: number; lng: number; count: number; types: Record<string, number> }>
+  >([]);
   const [safeSpaces, setSafeSpaces] = useState<Array<{ lat: number; lng: number; name: string }>>([]);
-  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number }>(TUNIS_CENTER);
+  const [currentLocation, setCurrentLocation] = useState<{ lat: number; lng: number }>({ lat: 36.8065, lng: 10.1815 });
 
   useEffect(() => {
-    // Get user's current location
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
-          setCurrentLocation(loc);
-          loadMapData(loc.lat, loc.lng);
-        },
-        () => {
-          loadMapData(TUNIS_CENTER[0], TUNIS_CENTER[1]);
-        }
-      );
-    } else {
-      loadMapData(TUNIS_CENTER[0], TUNIS_CENTER[1]);
+    if (!navigator.geolocation) {
+      loadMapData(currentLocation.lat, currentLocation.lng);
+      return;
     }
+
+    const watcher = navigator.geolocation.watchPosition(
+      (position) => {
+        const loc = { lat: position.coords.latitude, lng: position.coords.longitude };
+        setCurrentLocation(loc);
+        loadMapData(loc.lat, loc.lng);
+      },
+      (err) => {
+        console.warn("Geolocation failed:", err);
+        loadMapData(currentLocation.lat, currentLocation.lng);
+      },
+      { enableHighAccuracy: true, maximumAge: 5000, timeout: 10000 }
+    );
+
+    return () => {
+      navigator.geolocation.clearWatch(watcher);
+    };
   }, [timeFilter]);
 
   const loadMapData = async (lat: number, lng: number) => {
     try {
       if (isAuthenticated) {
-        // Load heatmap data from backend
         const heatmapRes = await api.getHeatmap(lat, lng, 5000);
         setHeatmapData(heatmapRes.reports || []);
 
-        // Load safe spaces
         const spacesRes = await api.getNearbySafeSpaces(lat, lng, 5000);
         setSafeSpaces(
           spacesRes.safeSpaces.map((s: any) => ({
@@ -81,7 +78,6 @@ const SafetyMap = () => {
           }))
         );
       } else {
-        // Fallback to mock data
         setHeatmapData([
           { lat: 36.8089, lng: 10.1657, count: 5, types: { verbal: 3, physical: 2 } },
           { lat: 36.8012, lng: 10.1799, count: 3, types: { verbal: 2, stalking: 1 } },
@@ -93,29 +89,27 @@ const SafetyMap = () => {
       }
     } catch (error) {
       console.error("Failed to load map data:", error);
-      // Fallback to mock data
-      setHeatmapData([
-        { lat: 36.8089, lng: 10.1657, count: 5, types: { verbal: 3, physical: 2 } },
-      ]);
     }
   };
 
   const getIntensity = (count: number) => {
-    // Normalize intensity based on count
     if (count >= 10) return 0.9;
     if (count >= 5) return 0.7;
     if (count >= 2) return 0.5;
     return 0.3;
   };
 
+  const MapController = () => {
+    const map = useMap();
+    useEffect(() => {
+      map.setView([currentLocation.lat, currentLocation.lng], 14);
+    }, [currentLocation, map]);
+    return null;
+  };
+
   return (
     <div className="relative h-screen w-full">
-      <MapContainer
-        center={TUNIS_CENTER}
-        zoom={14}
-        className="h-full w-full z-0"
-        zoomControl={false}
-      >
+      <MapContainer center={[currentLocation.lat, currentLocation.lng]} zoom={14} className="h-full w-full z-0" zoomControl={false}>
         <MapController />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
@@ -141,12 +135,13 @@ const SafetyMap = () => {
 
         {showSafeSpaces &&
           safeSpaces.map((space, index) => (
-            <Marker
-              key={`safe-${index}`}
-              position={[space.lat, space.lng]}
-              icon={safeIcon}
-            />
+            <Marker key={`safe-${index}`} position={[space.lat, space.lng]} icon={safeIcon} />
           ))}
+
+        {/* User marker */}
+        <Marker position={[currentLocation.lat, currentLocation.lng]}>
+          <div className="w-3 h-3 bg-blue-400 rounded-full border-2 border-white" />
+        </Marker>
       </MapContainer>
 
       {/* Controls */}
@@ -204,3 +199,4 @@ const SafetyMap = () => {
 };
 
 export default SafetyMap;
+
