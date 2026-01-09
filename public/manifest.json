@@ -1,0 +1,17 @@
+{
+  "name": "EnaZeda - Safety Platform for Women in Tunisia",
+  "short_name": "EnaZeda",
+  "description": "Report street harassment, visualize danger zones, walk safely with community support",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "icons": [
+    {
+      "src": "/enazeda.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
